@@ -11,21 +11,32 @@ float current_az = 0.0;
 float current_alt = 0.0;
 
 /**
- * Update current Azimuth and Altitude from IMU sensor
+ * Update current Azimuth and Altitude from IMU sensor.
+ * Adjusted for SparkFun BNO08x library function names and constants.
  */
 void updatePosition() {
-  if (myIMU.getSensorEvent() && myIMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR) {
-    // Get raw orientation in degrees
-    float raw_az = myIMU.getYaw() * 180.0 / PI;
-    current_alt = myIMU.getPitch() * 180.0 / PI;
+  // Use getSensorEvent() to check for new data and update internal states
+  if (myIMU.getSensorEvent() == true) {
+    uint8_t reportID = myIMU.getSensorEventID();
+    
+    // Check if the report is either standard or AR/VR stabilized rotation vector
+    // Note: Constants fixed with "AR_VR" as per compiler suggestion
+    if (reportID == SENSOR_REPORTID_ROTATION_VECTOR || 
+        reportID == SENSOR_REPORTID_AR_VR_STABILIZED_ROTATION_VECTOR) {
+      
+      const float radToDeg = 180.0 / PI;
 
-    // --- FIX: Reverse the horizontal direction ---
-    // Subtracting from 360 flips the left/right movement
-    current_az = 360.0 - raw_az;
+      // Retrieve orientation data
+      float raw_az = myIMU.getYaw() * radToDeg;
+      current_alt = myIMU.getPitch() * radToDeg;
 
-    // Normalize Azimuth to 0-359.99
-    while (current_az < 0) current_az += 360;
-    while (current_az >= 360) current_az -= 360;
+      // --- FIX: Reverse the horizontal direction for telescope mount logic ---
+      current_az = 360.0 - raw_az;
+
+      // Normalize Azimuth to ensure it stays within 0.0 - 359.99 range
+      while (current_az < 0) current_az += 360;
+      while (current_az >= 360) current_az -= 360;
+    }
   }
 }
 
@@ -34,13 +45,25 @@ void setup() {
   Wire.begin(21, 22);
   Wire.setClock(400000); 
 
-  // Initialize BNO08x IMU
+  // Initialize BNO08x IMU (Try both default addresses)
   if (!myIMU.begin(0x4A) && !myIMU.begin(0x4B)) {
-    while (1) { Serial.println("IMU Error"); delay(1000); }
+    while (1) { 
+      Serial.println(F("IMU Error: Could not find BNO08x")); 
+      delay(1000); 
+    }
   }
   
-  // Enable Rotation Vector with 10ms interval (100Hz)
-  myIMU.enableRotationVector(10); 
+  // Try to enable Stabilized Rotation Vector first
+  if (myIMU.enableARVRStabilizedRotationVector(10) == true) { 
+    Serial.println(F("AR/VR Stabilized Rotation vector enabled"));
+  }
+  else if (myIMU.enableRotationVector(10) == true) { 
+    // If Stabilized fails, fall back to standard Rotation Vector
+    Serial.println(F("Rotation vector enabled (Fallback)"));
+  }
+  else {
+    Serial.println(F("Failed to enable any rotation vector"));
+  }
 
   WiFi.softAP(ssid, password);
   server.begin();
@@ -72,6 +95,8 @@ void loop() {
           client.print("\r");
         }
       }
+      // Small delay to allow ESP32 to handle background tasks (like WiFi)
+      delay(5);
     }
   }
 }
