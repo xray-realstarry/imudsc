@@ -37,6 +37,7 @@ To connect SkySafari to your telescope, follow these steps:
     * **Port**: `4030`
 4. **Encoder Settings**:
     * **Steps per Revolution**: `36000` (for both axes)
+    * **Steps per Revolution**: Enable `Get Automatically`
 
 ## Important Notes
 * **Alignment**: After connecting, use the "Align" feature in SkySafari on a known star to synchronize the IMU with the sky.
