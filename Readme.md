@@ -36,7 +36,6 @@ To connect SkySafari to your telescope, follow these steps:
     * **IP Address**: `192.168.4.1`
     * **Port**: `4030`
 4. **Encoder Settings**:
-    * **Steps per Revolution**: `36000` (for both axes)
     * **Steps per Revolution**: Enable `Get Automatically`
 
 ## Important Notes
