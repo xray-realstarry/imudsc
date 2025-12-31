@@ -25,6 +25,16 @@ This project implements a **Push-To telescope controller** using an **ESP32** an
 Please install the following library via the Arduino Library Manager:
 * **SparkFun BNO08x Arduino Library** (by SparkFun Electronics)
 
+## Web Interface
+The ESP32 hosts a built-in web server for real-time monitoring and configuration. 
+
+1. Connect to the **"ESP32_Telescope"** Wi-Fi.
+2. Open your web browser and navigate to `http://192.168.4.1`.
+3. **Features**:
+    * **Live Monitoring**: View current Altitude and Azimuth values.
+    * **Sensor Status**: Check BNO086 calibration and connection state.
+    * **Calibration**: Reset or adjust the sensor orientation.
+
 ## SkySafari Setup
 To connect SkySafari to your telescope, follow these steps:
 
