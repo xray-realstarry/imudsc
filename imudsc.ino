@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <Wire.h>
+#include <WebServer.h>
 #include <SparkFun_BNO08x_Arduino_Library.h>
 
 // ==================================================
@@ -7,7 +8,12 @@
 // ==================================================
 constexpr char WIFI_SSID[] = "ESP32_Telescope";
 constexpr char WIFI_PASS[] = "12345678";
-WiFiServer server(4030);
+WiFiServer skySaferiServer(4030);
+
+// ==================================================
+// Web Settings
+// ==================================================
+WebServer webServer(80);
 
 // ==================================================
 // IMU
@@ -34,6 +40,31 @@ float current_alt_deg = 0.0f;
 // ==================================================
 long az_counter  = 0;
 long alt_counter = 0;
+
+// Root page: Basic UI with auto-refresh script
+void handleRoot() {
+  String html = "<html><head><meta charset='UTF-8'><title>Telescope Status</title>";
+  html += "<style>body{font-family:sans-serif; text-align:center; padding-top:50px; background:#1a1a1a; color:#eee;}";
+  html += "h1{color:#ff6600;} .val{font-size:3em; font-weight:bold;}</style>";
+  html += "<script>setInterval(()=>{fetch('/data').then(r=>r.json()).then(d=>{";
+  html += "document.getElementById('az').innerText=d.az.toFixed(2);";
+  html += "document.getElementById('alt').innerText=d.alt.toFixed(2);";
+  html += "});}, 500);</script></head><body>";
+  html += "<h1>Telescope Status</h1>";
+  html += "<div>AZ: <span id='az' class='val'>0</span>°</div>";
+  html += "<div>ALT: <span id='alt' class='val'>0</span>°</div>";
+  html += "</body></html>";
+  webServer.send(200, "text/html", html);
+}
+
+// JSON endpoint for data
+void handleData() {
+  String json = "{";
+  json += "\"az\":" + String(current_az_deg) + ",";
+  json += "\"alt\":" + String(current_alt_deg);
+  json += "}";
+  webServer.send(200, "application/json", json);
+}
 
 // ==================================================
 // Utility
@@ -107,7 +138,12 @@ void setup() {
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
   WiFi.softAP(WIFI_SSID, WIFI_PASS);
-  server.begin();
+  skySaferiServer.begin();
+
+  // Web Server Routes
+  webServer.on("/", handleRoot);
+  webServer.on("/data", handleData);
+  webServer.begin();
 
   Serial.println("SkySafari BBox Encoder Ready");
 }
@@ -118,11 +154,14 @@ void setup() {
 void loop() {
   updatePosition();
 
-  WiFiClient client = server.available();
+  webServer.handleClient();
+
+  WiFiClient client = skySaferiServer.available();
   if (!client) return;
 
   while (client.connected()) {
     updatePosition();
+    webServer.handleClient();
     if (!client.available()) continue;
 
     char cmd = client.read();
