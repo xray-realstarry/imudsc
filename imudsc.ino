@@ -8,7 +8,7 @@
 // ==================================================
 constexpr char WIFI_SSID[] = "ESP32_Telescope";
 constexpr char WIFI_PASS[] = "12345678";
-WiFiServer skySaferiServer(4030);
+WiFiServer skySafariServer(4030);
 
 // ==================================================
 // Web Settings
@@ -21,7 +21,23 @@ WebServer webServer(80);
 BNO08x imu;
 
 // ==================================================
-// BBox encoder settings
+// IMU Mode
+// ==================================================
+enum ImuMode {
+  IMU_ROTATION,
+  IMU_GAME
+};
+
+ImuMode imuMode = IMU_ROTATION;
+
+const char* imuModeName() {
+  return (imuMode == IMU_ROTATION)
+         ? "Rotation (Mag)"
+         : "Game (No Mag)";
+}
+
+// ==================================================
+// Encoder settings (BBox)
 // ==================================================
 constexpr float AZ_STEPS_PER_DEG  = 100.0f;
 constexpr float ALT_STEPS_PER_DEG = 100.0f;
@@ -41,46 +57,44 @@ float current_alt_deg = 0.0f;
 long az_counter  = 0;
 long alt_counter = 0;
 
-// Root page: Basic UI with auto-refresh script
-void handleRoot() {
-  String html = "<html><head><meta charset='UTF-8'><title>Telescope Status</title>";
-  html += "<style>body{font-family:sans-serif; text-align:center; padding-top:50px; background:#1a1a1a; color:#eee;}";
-  html += "h1{color:#ff6600;} .val{font-size:3em; font-weight:bold;}</style>";
-  html += "<script>setInterval(()=>{fetch('/data').then(r=>r.json()).then(d=>{";
-  html += "document.getElementById('az').innerText=d.az.toFixed(2);";
-  html += "document.getElementById('alt').innerText=d.alt.toFixed(2);";
-  html += "});}, 500);</script></head><body>";
-  html += "<h1>Telescope Status</h1>";
-  html += "<div>AZ: <span id='az' class='val'>0</span>°</div>";
-  html += "<div>ALT: <span id='alt' class='val'>0</span>°</div>";
-  html += "</body></html>";
-  webServer.send(200, "text/html", html);
-}
-
-// JSON endpoint for data
-void handleData() {
-  String json = "{";
-  json += "\"az\":" + String(current_az_deg) + ",";
-  json += "\"alt\":" + String(current_alt_deg);
-  json += "}";
-  webServer.send(200, "application/json", json);
-}
-
 // ==================================================
 // Utility
 // ==================================================
 float normalize360(float deg) {
-  while (deg < 0)   deg += 360.0f;
+  while (deg < 0) deg += 360.0f;
   while (deg >= 360.0f) deg -= 360.0f;
   return deg;
 }
 
 // ==================================================
-// Update telescope position from BNO086
+// IMU mode switch
+// ==================================================
+void setImuMode(ImuMode mode) {
+  // --- stop both reports ---
+  imu.enableReport(SENSOR_REPORTID_ROTATION_VECTOR, 0);
+  imu.enableReport(SENSOR_REPORTID_GAME_ROTATION_VECTOR, 0);
+
+  if (mode == IMU_ROTATION) {
+    imu.enableRotationVector(20);
+    Serial.println("IMU: Rotation Vector (Mag)");
+  } else {
+    imu.enableGameRotationVector(20);
+    Serial.println("IMU: Game Rotation Vector (No Mag)");
+  }
+  imuMode = mode;
+}
+
+// ==================================================
+// Update position from IMU
 // ==================================================
 void updatePosition() {
   if (!imu.getSensorEvent()) return;
-  if (imu.getSensorEventID() != SENSOR_REPORTID_ROTATION_VECTOR) return;
+
+  if (imuMode == IMU_ROTATION &&
+      imu.getSensorEventID() != SENSOR_REPORTID_ROTATION_VECTOR) return;
+
+  if (imuMode == IMU_GAME &&
+      imu.getSensorEventID() != SENSOR_REPORTID_GAME_ROTATION_VECTOR) return;
 
   // --- IMU raw angles (deg) ---
   float yaw   = imu.getYaw()   * 180.0f / PI;
@@ -108,7 +122,8 @@ void updatePosition() {
 // ==================================================
 void sendPosition(WiFiClient &c) {
   char buf[32];
-  snprintf(buf, sizeof(buf), "%+06ld\t%+06ld\r", az_counter, alt_counter);
+  snprintf(buf, sizeof(buf), "%+06ld\t%+06ld\r",
+           az_counter, alt_counter);
   c.write((uint8_t*)buf, strlen(buf));
 }
 
@@ -116,6 +131,77 @@ void sendResolution(WiFiClient &c) {
   char buf[32];
   snprintf(buf, sizeof(buf), "%ld-%ld\r", AZ_RES, ALT_RES);
   c.write((uint8_t*)buf, strlen(buf));
+}
+
+// ==================================================
+// Web Handlers
+// ==================================================
+void handleData() {
+  String json = "{";
+  json += "\"az\":" + String(current_az_deg) + ",";
+  json += "\"alt\":" + String(current_alt_deg) + ",";
+  json += "\"imu\":\"" + String(imuModeName()) + "\"";
+  json += "}";
+  webServer.send(200, "application/json", json);
+}
+
+void handleMode() {
+  if (!webServer.hasArg("imu")) {
+    webServer.send(400, "text/plain", "missing imu");
+    return;
+  }
+
+  String m = webServer.arg("imu");
+  if (m == "rotation") setImuMode(IMU_ROTATION);
+  else if (m == "game") setImuMode(IMU_GAME);
+  else {
+    webServer.send(400, "text/plain", "bad mode");
+    return;
+  }
+
+  webServer.send(200, "text/plain", "OK");
+}
+
+void handleRoot() {
+  String html =
+  "<html><head><meta charset='UTF-8'>"
+  "<title>Telescope Status</title>"
+  "<style>"
+  "body{font-family:sans-serif;text-align:center;padding-top:40px;"
+  "background:#1a1a1a;color:#eee;}"
+  "h1{color:#ff6600;}"
+  ".val{font-size:3em;font-weight:bold;}"
+  "button{font-size:1.2em;padding:10px 20px;margin-top:20px;}"
+  "</style>"
+
+  "<script>"
+  "let imuMode='';"
+  "function refresh(){"
+    "fetch('/data').then(r=>r.json()).then(d=>{"
+      "document.getElementById('az').innerText=d.az.toFixed(2);"
+      "document.getElementById('alt').innerText=d.alt.toFixed(2);"
+      "document.getElementById('imu').innerText=d.imu;"
+      "imuMode=d.imu.includes('Rotation')?'rotation':'game';"
+      "document.getElementById('btn').innerText="
+        "imuMode=='rotation'?'Switch to Game':'Switch to Rotation';"
+    "});"
+  "}"
+  "function toggleIMU(){"
+    "let next=(imuMode=='rotation')?'game':'rotation';"
+    "fetch('/mode?imu='+next).then(()=>setTimeout(refresh,200));"
+  "}"
+  "setInterval(refresh,500);"
+  "</script></head><body>"
+
+  "<h1>Telescope Status</h1>"
+  "<div>AZ: <span id='az' class='val'>0</span>°</div>"
+  "<div>ALT: <span id='alt' class='val'>0</span>°</div>"
+  "<div style='margin-top:20px'>IMU: <b id='imu'>?</b></div>"
+  "<button id='btn' onclick='toggleIMU()'>Switch</button>"
+
+  "</body></html>";
+
+  webServer.send(200, "text/html", html);
 }
 
 // ==================================================
@@ -133,16 +219,17 @@ void setup() {
     while (true);
   }
 
-  imu.enableRotationVector(20);
+  setImuMode(IMU_ROTATION);
 
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
   WiFi.softAP(WIFI_SSID, WIFI_PASS);
-  skySaferiServer.begin();
 
-  // Web Server Routes
+  skySafariServer.begin();
+
   webServer.on("/", handleRoot);
   webServer.on("/data", handleData);
+  webServer.on("/mode", handleMode);
   webServer.begin();
 
   Serial.println("SkySafari BBox Encoder Ready");
@@ -153,15 +240,15 @@ void setup() {
 // ==================================================
 void loop() {
   updatePosition();
-
   webServer.handleClient();
 
-  WiFiClient client = skySaferiServer.available();
+  WiFiClient client = skySafariServer.available();
   if (!client) return;
 
   while (client.connected()) {
     updatePosition();
     webServer.handleClient();
+
     if (!client.available()) continue;
 
     char cmd = client.read();
@@ -170,6 +257,7 @@ void loop() {
       case 'H': sendResolution(client); break;
       default:  break;
     }
+
     yield();
   }
 
