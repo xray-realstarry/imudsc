@@ -2,12 +2,14 @@
 #include <Wire.h>
 #include <WebServer.h>
 #include <SparkFun_BNO08x_Arduino_Library.h>
+#include <Preferences.h>
 
 // ==================================================
 // Wi-Fi Settings (SoftAP)
 // ==================================================
-constexpr char WIFI_SSID[] = "ESP32_Telescope";
-constexpr char WIFI_PASS[] = "12345678";
+Preferences preferences;
+String wifiSSID = "ESP32_Telescope";
+String wifiPASS = "12345678";
 WiFiServer skySafariServer(4030);
 
 // ==================================================
@@ -162,6 +164,25 @@ void handleMode() {
   webServer.send(200, "text/plain", "OK");
 }
 
+void handleWifiSettings() {
+  if (!webServer.hasArg("ssid") || !webServer.hasArg("pass")) {
+    webServer.send(400, "text/plain", "missing ssid or pass");
+    return;
+  }
+
+  String newSSID = webServer.arg("ssid");
+  String newPASS = webServer.arg("pass");
+
+  preferences.begin("wifi", false);
+  preferences.putString("ssid", newSSID);
+  preferences.putString("pass", newPASS);
+  preferences.end();
+
+  webServer.send(200, "text/plain", "WiFi settings updated. Rebooting...");
+  delay(1000);
+  ESP.restart();
+}
+
 void handleRoot() {
   String html =
   "<html><head><meta charset='UTF-8'>"
@@ -172,6 +193,8 @@ void handleRoot() {
   "h1{color:#ff6600;}"
   ".val{font-size:3em;font-weight:bold;}"
   "button{font-size:1.2em;padding:10px 20px;margin-top:20px;}"
+  "form{margin-top:40px;padding:20px;border:1px solid #444;background:#222;}"
+  "input{font-size:1em;padding:5px;margin:5px;}"
   "</style>"
 
   "<script>"
@@ -199,6 +222,18 @@ void handleRoot() {
   "<div style='margin-top:20px'>IMU: <b id='imu'>?</b></div>"
   "<button id='btn' onclick='toggleIMU()'>Switch</button>"
 
+  "<form action='/wifi' method='POST'>"
+  "<h2>WiFi Settings</h2>"
+  "<input type='text' name='ssid' placeholder='SSID' value='" + wifiSSID + "' required><br>"
+  "<input type='password' name='pass' placeholder='Password' value='" + wifiPASS + "' required><br>"
+  "<button type='submit'>Update WiFi</button>"
+  "</form>"
+
+  "</body></html>";
+
+  webServer.send(200, "text/html", html);
+}
+
   "</body></html>";
 
   webServer.send(200, "text/html", html);
@@ -210,6 +245,11 @@ void handleRoot() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+
+  preferences.begin("wifi", false);
+  wifiSSID = preferences.getString("ssid", "ESP32_Telescope");
+  wifiPASS = preferences.getString("pass", "12345678");
+  preferences.end();
 
   Wire.begin(21, 22);
   Wire.setClock(400000);
@@ -223,13 +263,14 @@ void setup() {
 
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
-  WiFi.softAP(WIFI_SSID, WIFI_PASS);
+  WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str());
 
   skySafariServer.begin();
 
   webServer.on("/", handleRoot);
   webServer.on("/data", handleData);
   webServer.on("/mode", handleMode);
+  webServer.on("/wifi", HTTP_POST, handleWifiSettings);
   webServer.begin();
 
   Serial.println("SkySafari BBox Encoder Ready");
