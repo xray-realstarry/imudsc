@@ -173,6 +173,12 @@ void handleWifiSettings() {
   String newSSID = webServer.arg("ssid");
   String newPASS = webServer.arg("pass");
 
+  // Add validation for WPA2 password minimum length
+  if (newPASS.length() < 8) {
+    webServer.send(400, "text/plain", "Password must be at least 8 characters");
+    return;
+  }
+
   preferences.begin("wifi", false);
   preferences.putString("ssid", newSSID);
   preferences.putString("pass", newPASS);
@@ -228,11 +234,6 @@ void handleRoot() {
   "<input type='password' name='pass' placeholder='Password' value='" + wifiPASS + "' required><br>"
   "<button type='submit'>Update WiFi</button>"
   "</form>"
-
-  "</body></html>";
-
-  webServer.send(200, "text/html", html);
-}
 
   "</body></html>";
 
