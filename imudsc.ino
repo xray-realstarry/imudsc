@@ -10,6 +10,7 @@
 Preferences preferences;
 String wifiSSID = "ESP32_Telescope";
 String wifiPASS = "12345678";
+int wifiChannel = 11;
 WiFiServer skySafariServer(4030);
 
 // ==================================================
@@ -172,6 +173,10 @@ void handleWifiSettings() {
 
   String newSSID = webServer.arg("ssid");
   String newPASS = webServer.arg("pass");
+  int newCH = 11;
+  if (webServer.hasArg("ch")) {
+    newCH = webServer.arg("ch").toInt();
+  }
 
   // Add validation for WPA2 password minimum length
   if (newPASS.length() < 8) {
@@ -182,6 +187,7 @@ void handleWifiSettings() {
   preferences.begin("wifi", false);
   preferences.putString("ssid", newSSID);
   preferences.putString("pass", newPASS);
+  preferences.putInt("ch", newCH);
   preferences.end();
 
   webServer.send(200, "text/plain", "WiFi settings updated. Rebooting...");
@@ -232,6 +238,11 @@ void handleRoot() {
   "<h2>WiFi Settings</h2>"
   "<input type='text' name='ssid' placeholder='SSID' value='" + wifiSSID + "' required><br>"
   "<input type='password' name='pass' placeholder='Password' value='" + wifiPASS + "' required><br>"
+  "Channel: <select name='ch'>"
+  "<option value='1'" + String(wifiChannel == 1 ? " selected" : "") + ">1ch</option>"
+  "<option value='6'" + String(wifiChannel == 6 ? " selected" : "") + ">6ch</option>"
+  "<option value='11'" + String(wifiChannel == 11 ? " selected" : "") + ">11ch</option>"
+  "</select><br>"
   "<button type='submit'>Update WiFi</button>"
   "</form>"
 
@@ -250,6 +261,7 @@ void setup() {
   preferences.begin("wifi", false);
   wifiSSID = preferences.getString("ssid", "ESP32_Telescope");
   wifiPASS = preferences.getString("pass", "12345678");
+  wifiChannel = preferences.getInt("ch", 11);
   preferences.end();
 
   Wire.begin(21, 22);
@@ -264,7 +276,7 @@ void setup() {
 
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
-  WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str());
+  WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str(), wifiChannel);
 
   skySafariServer.begin();
 
