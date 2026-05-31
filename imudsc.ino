@@ -8,8 +8,8 @@
 // Wi-Fi Settings (SoftAP)
 // ==================================================
 Preferences preferences;
-String wifiSSID = "ESP32_Telescope";
-String wifiPASS = "12345678";
+String wifiSSID = "";
+String wifiPASS = "";
 int wifiChannel = 11;
 WiFiServer skySafariServer(4030);
 
@@ -73,7 +73,7 @@ float normalize360(float deg) {
 // IMU mode switch
 // ==================================================
 void setImuMode(ImuMode mode) {
-  // --- stop both reports ---
+  // --- Stop both reports ---
   imu.enableReport(SENSOR_REPORTID_ROTATION_VECTOR, 0);
   imu.enableReport(SENSOR_REPORTID_GAME_ROTATION_VECTOR, 0);
 
@@ -107,11 +107,11 @@ void updatePosition() {
   yaw   = -yaw;
   pitch = -pitch;
 
-  // --- apply zero-point calibration ---
+  // --- Apply zero-point calibration ---
   current_az_deg  = normalize360(yaw);
   current_alt_deg = pitch;
 
-  // --- degrees -> encoder counts ---
+  // --- Degrees -> encoder counts ---
   az_counter  = long(current_az_deg  * AZ_STEPS_PER_DEG);
   alt_counter = long(current_alt_deg * ALT_STEPS_PER_DEG);
 
@@ -258,11 +258,34 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
+  // --- Prepare auto-generated SSID ---
+  // Initialize Wi-Fi in AP mode first to get the MAC address
+  WiFi.mode(WIFI_AP);
+  String mac = WiFi.softAPmacAddress(); // e.g., "AA:BB:CC:11:22:33"
+  mac.replace(":", "");                 // Remove colons -> "AABBCC112233"
+  
+  // Create default SSID using the last 4 characters
+  // e.g., "IMUDSC_" + "2233" -> "IMUDSC_2233"
+  String defaultSSID = "IMUDSC_" + mac.substring(8); 
+
   preferences.begin("wifi", false);
-  wifiSSID = preferences.getString("ssid", "ESP32_Telescope");
+  
+  // Use the generated defaultSSID as the fallback
+  wifiSSID = preferences.getString("ssid", defaultSSID);
   wifiPASS = preferences.getString("pass", "12345678");
   wifiChannel = preferences.getInt("ch", 11);
   preferences.end();
+  
+  // Display currently loaded settings to Serial Monitor (for debugging)
+  Serial.println("-------------------------");
+  Serial.println("Attempting to start AP with:");
+  Serial.println("SSID: [" + wifiSSID + "]");
+  Serial.println("PASS: [" + wifiPASS + "] (Length: " + String(wifiPASS.length()) + ")");
+  Serial.println("CH:   [" + String(wifiChannel) + "]");
+  if(wifiPASS.length() < 8) {
+    Serial.println("WARNING: Password is less than 8 chars. SoftAP will FAIL!");
+  }
+  Serial.println("-------------------------");
 
   Wire.begin(21, 22);
   Wire.setClock(400000);
@@ -274,6 +297,7 @@ void setup() {
 
   setImuMode(IMU_ROTATION);
 
+  // Set Wi-Fi channel dynamically
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
   WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str(), wifiChannel);
