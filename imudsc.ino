@@ -13,6 +13,9 @@ String wifiPASS = "";
 int wifiChannel = 11;
 WiFiServer skySafariServer(4030);
 
+constexpr char DEFAULT_WIFI_PASS[]  = "12345678";
+constexpr int  DEFAULT_WIFI_CHANNEL = 11;
+
 // ==================================================
 // Web Settings
 // ==================================================
@@ -165,6 +168,37 @@ void handleMode() {
   webServer.send(200, "text/plain", "OK");
 }
 
+// SSID: 1-32 bytes (802.11 limit). Password: 8-63 chars (WPA2-PSK ASCII limit).
+bool isValidWifiSSID(const String &ssid) {
+  return ssid.length() >= 1 && ssid.length() <= 32;
+}
+
+bool isValidWifiPassword(const String &pass) {
+  return pass.length() >= 8 && pass.length() <= 63;
+}
+
+bool isValidWifiChannel(int ch) {
+  return ch >= 1 && ch <= 13;
+}
+
+// Escapes text before embedding it into a single-quoted HTML attribute.
+String htmlEscape(const String &s) {
+  String out;
+  out.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '&':  out += "&amp;";  break;
+      case '<':  out += "&lt;";   break;
+      case '>':  out += "&gt;";   break;
+      case '"':  out += "&quot;"; break;
+      case '\'': out += "&#39;";  break;
+      default:   out += c;
+    }
+  }
+  return out;
+}
+
 void handleWifiSettings() {
   if (!webServer.hasArg("ssid") || !webServer.hasArg("pass")) {
     webServer.send(400, "text/plain", "missing ssid or pass");
@@ -173,15 +207,23 @@ void handleWifiSettings() {
 
   String newSSID = webServer.arg("ssid");
   String newPASS = webServer.arg("pass");
-  int newCH = 11;
-  if (webServer.hasArg("ch")) {
-    newCH = webServer.arg("ch").toInt();
+
+  if (!isValidWifiSSID(newSSID)) {
+    webServer.send(400, "text/plain", "SSID must be 1-32 characters");
+    return;
+  }
+  if (!isValidWifiPassword(newPASS)) {
+    webServer.send(400, "text/plain", "Password must be 8-63 characters");
+    return;
   }
 
-  // Add validation for WPA2 password minimum length
-  if (newPASS.length() < 8) {
-    webServer.send(400, "text/plain", "Password must be at least 8 characters");
-    return;
+  int newCH = DEFAULT_WIFI_CHANNEL;
+  if (webServer.hasArg("ch")) {
+    newCH = webServer.arg("ch").toInt();
+    if (!isValidWifiChannel(newCH)) {
+      webServer.send(400, "text/plain", "Channel must be 1-13");
+      return;
+    }
   }
 
   preferences.begin("wifi", false);
@@ -202,48 +244,85 @@ void handleRoot() {
   "<style>"
   "body{font-family:sans-serif;text-align:center;padding-top:40px;"
   "background:#1a1a1a;color:#eee;}"
-  "h1{color:#ff6600;}"
+  "h1{color:#ff6600;display:inline-block;margin:0 10px;}"
   ".val{font-size:3em;font-weight:bold;}"
   "button{font-size:1.2em;padding:10px 20px;margin-top:20px;}"
   "form{margin-top:40px;padding:20px;border:1px solid #444;background:#222;}"
   "input{font-size:1em;padding:5px;margin:5px;}"
+  "#langBtn{font-size:0.9em;padding:4px 10px;margin:0;vertical-align:middle;}"
   "</style>"
 
   "<script>"
+  "const i18n={"
+    "en:{title:'Telescope Status',imu_label:'IMU:',"
+      "switch_to_game:'Switch to Game',switch_to_rotation:'Switch to Rotation',"
+      "mode_rotation:'Rotation (Mag)',mode_game:'Game (No Mag)',"
+      "wifi_heading:'WiFi Settings',ssid_ph:'SSID',pass_ph:'New Password',"
+      "channel_label:'Channel:',update_btn:'Update WiFi',lang_btn:'\\u65e5\\u672c\\u8a9e'},"
+    "ja:{title:'\\u671b\\u9060\\u93e1\\u30b9\\u30c6\\u30fc\\u30bf\\u30b9',imu_label:'IMU:',"
+      "switch_to_game:'\\u30b2\\u30fc\\u30e0\\u30e2\\u30fc\\u30c9\\u306b\\u5207\\u66ff',"
+      "switch_to_rotation:'\\u56de\\u8ee2\\u30e2\\u30fc\\u30c9\\u306b\\u5207\\u66ff',"
+      "mode_rotation:'\\u56de\\u8ee2 (\\u78c1\\u6c17\\u3042\\u308a)',"
+      "mode_game:'\\u30b2\\u30fc\\u30e0 (\\u78c1\\u6c17\\u306a\\u3057)',"
+      "wifi_heading:'Wi-Fi\\u8a2d\\u5b9a',ssid_ph:'SSID',pass_ph:'\\u65b0\\u3057\\u3044\\u30d1\\u30b9\\u30ef\\u30fc\\u30c9',"
+      "channel_label:'\\u30c1\\u30e3\\u30f3\\u30cd\\u30eb:',update_btn:'Wi-Fi\\u3092\\u66f4\\u65b0',lang_btn:'English'}"
+  "};"
+  "let lang=localStorage.getItem('lang')||'en';"
   "let imuMode='';"
+  "function t(k){return i18n[lang][k];}"
+  "function applyLang(){"
+    "document.title=t('title');"
+    "document.getElementById('title').innerText=t('title');"
+    "document.getElementById('imuLabel').innerText=t('imu_label');"
+    "document.getElementById('btn').innerText="
+      "imuMode=='game'?t('switch_to_rotation'):t('switch_to_game');"
+    "document.getElementById('wifiHeading').innerText=t('wifi_heading');"
+    "document.getElementById('ssid').placeholder=t('ssid_ph');"
+    "document.getElementById('pass').placeholder=t('pass_ph');"
+    "document.getElementById('chLabel').innerText=t('channel_label');"
+    "document.getElementById('updateBtn').innerText=t('update_btn');"
+    "document.getElementById('langBtn').innerText=t('lang_btn');"
+    "document.getElementById('imu').innerText="
+      "imuMode=='game'?t('mode_game'):(imuMode=='rotation'?t('mode_rotation'):'?');"
+  "}"
+  "function toggleLang(){"
+    "lang=(lang=='en')?'ja':'en';"
+    "localStorage.setItem('lang',lang);"
+    "applyLang();"
+  "}"
   "function refresh(){"
     "fetch('/data').then(r=>r.json()).then(d=>{"
       "document.getElementById('az').innerText=d.az.toFixed(2);"
       "document.getElementById('alt').innerText=d.alt.toFixed(2);"
-      "document.getElementById('imu').innerText=d.imu;"
       "imuMode=d.imu.includes('Rotation')?'rotation':'game';"
-      "document.getElementById('btn').innerText="
-        "imuMode=='rotation'?'Switch to Game':'Switch to Rotation';"
+      "applyLang();"
     "});"
   "}"
   "function toggleIMU(){"
     "let next=(imuMode=='rotation')?'game':'rotation';"
     "fetch('/mode?imu='+next).then(()=>setTimeout(refresh,200));"
   "}"
+  "applyLang();"
   "setInterval(refresh,500);"
   "</script></head><body>"
 
-  "<h1>Telescope Status</h1>"
-  "<div>AZ: <span id='az' class='val'>0</span>°</div>"
-  "<div>ALT: <span id='alt' class='val'>0</span>°</div>"
-  "<div style='margin-top:20px'>IMU: <b id='imu'>?</b></div>"
+  "<h1 id='title'>Telescope Status</h1>"
+  "<button id='langBtn' onclick='toggleLang()'>\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e</button>"
+  "<div>AZ: <span id='az' class='val'>0</span>\xc2\xb0</div>"
+  "<div>ALT: <span id='alt' class='val'>0</span>\xc2\xb0</div>"
+  "<div style='margin-top:20px'><span id='imuLabel'>IMU:</span> <b id='imu'>?</b></div>"
   "<button id='btn' onclick='toggleIMU()'>Switch</button>"
 
   "<form action='/wifi' method='POST'>"
-  "<h2>WiFi Settings</h2>"
-  "<input type='text' name='ssid' placeholder='SSID' value='" + wifiSSID + "' required><br>"
-  "<input type='password' name='pass' placeholder='Password' value='" + wifiPASS + "' required><br>"
-  "Channel: <select name='ch'>"
+  "<h2 id='wifiHeading'>WiFi Settings</h2>"
+  "<input id='ssid' type='text' name='ssid' placeholder='SSID' value='" + htmlEscape(wifiSSID) + "' maxlength='32' required><br>"
+  "<input id='pass' type='password' name='pass' placeholder='New Password' maxlength='63' required><br>"
+  "<span id='chLabel'>Channel:</span> <select name='ch'>"
   "<option value='1'" + String(wifiChannel == 1 ? " selected" : "") + ">1ch</option>"
   "<option value='6'" + String(wifiChannel == 6 ? " selected" : "") + ">6ch</option>"
   "<option value='11'" + String(wifiChannel == 11 ? " selected" : "") + ">11ch</option>"
   "</select><br>"
-  "<button type='submit'>Update WiFi</button>"
+  "<button id='updateBtn' type='submit'>Update WiFi</button>"
   "</form>"
 
   "</body></html>";
@@ -269,22 +348,33 @@ void setup() {
   String defaultSSID = "IMUDSC_" + mac.substring(8); 
 
   preferences.begin("wifi", false);
-  
+
   // Use the generated defaultSSID as the fallback
   wifiSSID = preferences.getString("ssid", defaultSSID);
-  wifiPASS = preferences.getString("pass", "12345678");
-  wifiChannel = preferences.getInt("ch", 11);
+  wifiPASS = preferences.getString("pass", DEFAULT_WIFI_PASS);
+  wifiChannel = preferences.getInt("ch", DEFAULT_WIFI_CHANNEL);
   preferences.end();
-  
+
+  // Guard against invalid/stale NVS data (e.g. from a build predating
+  // validation) so the AP always comes up and stays reachable to fix it.
+  if (!isValidWifiSSID(wifiSSID)) {
+    Serial.println("WARNING: Stored SSID invalid, falling back to " + defaultSSID);
+    wifiSSID = defaultSSID;
+  }
+  if (!isValidWifiPassword(wifiPASS)) {
+    Serial.println("WARNING: Stored password invalid, falling back to default");
+    wifiPASS = DEFAULT_WIFI_PASS;
+  }
+  if (!isValidWifiChannel(wifiChannel)) {
+    wifiChannel = DEFAULT_WIFI_CHANNEL;
+  }
+
   // Display currently loaded settings to Serial Monitor (for debugging)
   Serial.println("-------------------------");
   Serial.println("Attempting to start AP with:");
   Serial.println("SSID: [" + wifiSSID + "]");
-  Serial.println("PASS: [" + wifiPASS + "] (Length: " + String(wifiPASS.length()) + ")");
+  Serial.println("PASS length: " + String(wifiPASS.length()));
   Serial.println("CH:   [" + String(wifiChannel) + "]");
-  if(wifiPASS.length() < 8) {
-    Serial.println("WARNING: Password is less than 8 chars. SoftAP will FAIL!");
-  }
   Serial.println("-------------------------");
 
   Wire.begin(21, 22);
@@ -297,8 +387,7 @@ void setup() {
 
   setImuMode(IMU_ROTATION);
 
-  // Set Wi-Fi channel dynamically
-  WiFi.mode(WIFI_AP);
+  // Wi-Fi mode was already set to WIFI_AP above (to read the MAC address).
   WiFi.setSleep(false);
   WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str(), wifiChannel);
 
