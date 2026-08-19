@@ -191,6 +191,11 @@ void handleData() {
 }
 
 void handleMode() {
+  if (!imuReady) {
+    webServer.send(409, "text/plain", "IMU not ready");
+    return;
+  }
+
   if (!webServer.hasArg("imu")) {
     webServer.send(400, "text/plain", "missing imu");
     return;
@@ -320,6 +325,10 @@ void setupCaptivePortalDhcpOption() {
   }
 }
 
+// Daily-use view: live AZ/ALT, IMU mode toggle, language toggle, and a
+// link to the WiFi settings page (kept off this page on purpose - it's
+// what the captive portal opens, and a password/text input here used to
+// grab autofocus/the keyboard on some phones the moment it popped up).
 void handleRoot() {
   String html =
   "<html><head><meta charset='UTF-8'>"
@@ -329,26 +338,38 @@ void handleRoot() {
   "background:#1a1a1a;color:#eee;}"
   "h1{color:#ff6600;display:inline-block;margin:0 10px;}"
   ".val{font-size:3em;font-weight:bold;}"
-  "button{font-size:1.2em;padding:10px 20px;margin-top:20px;}"
-  "form{margin-top:40px;padding:20px;border:1px solid #444;background:#222;}"
-  "input{font-size:1em;padding:5px;margin:5px;}"
+  "button,a.btn{font-size:1.2em;padding:10px 20px;margin-top:20px;display:inline-block;}"
+  "a.btn{color:#eee;text-decoration:none;border:1px solid #444;border-radius:4px;}"
   "#langBtn{font-size:0.9em;padding:4px 10px;margin:0;vertical-align:middle;}"
+  "#wifiLink{font-size:0.9em;padding:6px 14px;margin-top:50px;opacity:0.7;}"
   "</style>"
+  "</head><body>"
 
+  "<h1 id='title'>Telescope Status</h1>"
+  "<button id='langBtn' onclick='toggleLang()'>\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e</button>"
+  "<div>AZ: <span id='az' class='val'>0</span>\xc2\xb0</div>"
+  "<div>ALT: <span id='alt' class='val'>0</span>\xc2\xb0</div>"
+  "<div style='margin-top:20px'><span id='imuLabel'>IMU:</span> <b id='imu'>?</b></div>"
+  "<br><button id='btn' onclick='toggleIMU()'>Switch</button>"
+  "<br><a id='wifiLink' class='btn' href='/wifi'>WiFi Settings</a>"
+
+  // Script goes last so getElementById() below finds elements that have
+  // already been parsed - putting it in <head> meant applyLang() threw
+  // trying to touch not-yet-existent elements, which silently aborted
+  // the whole script and left AZ/ALT/IMU frozen at their placeholder text.
   "<script>"
   "const i18n={"
     "en:{title:'Telescope Status',imu_label:'IMU:',"
-      "switch_to_game:'Switch to Game',switch_to_rotation:'Switch to Rotation',"
-      "mode_rotation:'Rotation (Mag)',mode_game:'Game (No Mag)',"
-      "wifi_heading:'WiFi Settings',ssid_ph:'SSID',pass_ph:'New Password',"
-      "channel_label:'Channel:',update_btn:'Update WiFi',lang_btn:'\\u65e5\\u672c\\u8a9e'},"
+      "switch_to_nocompass:'Switch to No-Compass',switch_to_compass:'Switch to Compass',"
+      "mode_compass:'Compass Mode',mode_nocompass:'No-Compass Mode',mode_notfound:'Not Found',"
+      "wifi_link:'WiFi Settings',lang_btn:'\\u65e5\\u672c\\u8a9e'},"
     "ja:{title:'\\u671b\\u9060\\u93e1\\u30b9\\u30c6\\u30fc\\u30bf\\u30b9',imu_label:'IMU:',"
-      "switch_to_game:'\\u30b2\\u30fc\\u30e0\\u30e2\\u30fc\\u30c9\\u306b\\u5207\\u66ff',"
-      "switch_to_rotation:'\\u56de\\u8ee2\\u30e2\\u30fc\\u30c9\\u306b\\u5207\\u66ff',"
-      "mode_rotation:'\\u56de\\u8ee2 (\\u78c1\\u6c17\\u3042\\u308a)',"
-      "mode_game:'\\u30b2\\u30fc\\u30e0 (\\u78c1\\u6c17\\u306a\\u3057)',"
-      "wifi_heading:'Wi-Fi\\u8a2d\\u5b9a',ssid_ph:'SSID',pass_ph:'\\u65b0\\u3057\\u3044\\u30d1\\u30b9\\u30ef\\u30fc\\u30c9',"
-      "channel_label:'\\u30c1\\u30e3\\u30f3\\u30cd\\u30eb:',update_btn:'Wi-Fi\\u3092\\u66f4\\u65b0',lang_btn:'English'}"
+      "switch_to_nocompass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306a\\u3057\\u306b\\u5207\\u66ff',"
+      "switch_to_compass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306b\\u5207\\u66ff',"
+      "mode_compass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u30e2\\u30fc\\u30c9',"
+      "mode_nocompass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306a\\u3057\\u30e2\\u30fc\\u30c9',"
+      "mode_notfound:'\\u672a\\u691c\\u51fa',"
+      "wifi_link:'Wi-Fi\\u8a2d\\u5b9a',lang_btn:'English'}"
   "};"
   "let lang=localStorage.getItem('lang')||'en';"
   "let imuMode='';"
@@ -357,16 +378,15 @@ void handleRoot() {
     "document.title=t('title');"
     "document.getElementById('title').innerText=t('title');"
     "document.getElementById('imuLabel').innerText=t('imu_label');"
-    "document.getElementById('btn').innerText="
-      "imuMode=='game'?t('switch_to_rotation'):t('switch_to_game');"
-    "document.getElementById('wifiHeading').innerText=t('wifi_heading');"
-    "document.getElementById('ssid').placeholder=t('ssid_ph');"
-    "document.getElementById('pass').placeholder=t('pass_ph');"
-    "document.getElementById('chLabel').innerText=t('channel_label');"
-    "document.getElementById('updateBtn').innerText=t('update_btn');"
+    "let btn=document.getElementById('btn');"
+    "btn.disabled=(imuMode=='notfound');"
+    "btn.innerText=imuMode=='nocompass'?t('switch_to_compass'):t('switch_to_nocompass');"
+    "document.getElementById('wifiLink').innerText=t('wifi_link');"
     "document.getElementById('langBtn').innerText=t('lang_btn');"
     "document.getElementById('imu').innerText="
-      "imuMode=='game'?t('mode_game'):(imuMode=='rotation'?t('mode_rotation'):'?');"
+      "imuMode=='compass'?t('mode_compass'):"
+      "imuMode=='nocompass'?t('mode_nocompass'):"
+      "imuMode=='notfound'?t('mode_notfound'):'?';"
   "}"
   "function toggleLang(){"
     "lang=(lang=='en')?'ja':'en';"
@@ -377,27 +397,49 @@ void handleRoot() {
     "fetch('/data').then(r=>r.json()).then(d=>{"
       "document.getElementById('az').innerText=d.az.toFixed(2);"
       "document.getElementById('alt').innerText=d.alt.toFixed(2);"
-      "imuMode=d.imu.includes('Rotation')?'rotation':'game';"
+      "imuMode=d.imu.includes('Rotation')?'compass':d.imu.includes('Game')?'nocompass':'notfound';"
       "applyLang();"
     "});"
   "}"
   "function toggleIMU(){"
-    "let next=(imuMode=='rotation')?'game':'rotation';"
+    "if(imuMode=='notfound')return;"
+    "let next=(imuMode=='compass')?'game':'rotation';"
     "fetch('/mode?imu='+next).then(()=>setTimeout(refresh,200));"
   "}"
   "applyLang();"
   "setInterval(refresh,500);"
-  "</script></head><body>"
+  "</script>"
 
-  "<h1 id='title'>Telescope Status</h1>"
-  "<button id='langBtn' onclick='toggleLang()'>\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e</button>"
-  "<div>AZ: <span id='az' class='val'>0</span>\xc2\xb0</div>"
-  "<div>ALT: <span id='alt' class='val'>0</span>\xc2\xb0</div>"
-  "<div style='margin-top:20px'><span id='imuLabel'>IMU:</span> <b id='imu'>?</b></div>"
-  "<button id='btn' onclick='toggleIMU()'>Switch</button>"
+  "</body></html>";
+
+  webServer.send(200, "text/html", html);
+}
+
+// Separate settings page (not shown by the captive portal) so a
+// once-in-a-while task like changing the WiFi password doesn't get in
+// the way of - or grab keyboard focus during - everyday use of the page
+// above.
+void handleWifiPage() {
+  String html =
+  "<html><head><meta charset='UTF-8'>"
+  "<title>WiFi Settings</title>"
+  "<style>"
+  "body{font-family:sans-serif;text-align:center;padding-top:40px;"
+  "background:#1a1a1a;color:#eee;}"
+  "h1{color:#ff6600;font-size:1.4em;}"
+  "button{font-size:1.2em;padding:10px 20px;margin-top:20px;}"
+  "form{margin:20px auto 0;padding:20px;border:1px solid #444;background:#222;max-width:320px;}"
+  "input{font-size:1em;padding:5px;margin:5px;width:80%;}"
+  "a{color:#eee;}"
+  "#langBtn{font-size:0.9em;padding:4px 10px;margin:0;vertical-align:middle;}"
+  "</style>"
+  "</head><body>"
+
+  "<div><a id='backLink' href='/'>\xe2\x86\x90 Back</a> "
+  "<button id='langBtn' onclick='toggleLang()' style='float:right'>\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e</button></div>"
+  "<h1 id='title'>WiFi Settings</h1>"
 
   "<form action='/wifi' method='POST'>"
-  "<h2 id='wifiHeading'>WiFi Settings</h2>"
   "<input id='ssid' type='text' name='ssid' placeholder='SSID' value='" + htmlEscape(wifiSSID) + "' maxlength='32' required><br>"
   "<input id='pass' type='password' name='pass' placeholder='New Password' maxlength='63' required><br>"
   "<span id='chLabel'>Channel:</span> <select name='ch'>"
@@ -407,6 +449,35 @@ void handleRoot() {
   "</select><br>"
   "<button id='updateBtn' type='submit'>Update WiFi</button>"
   "</form>"
+
+  // Script goes last, after the elements above it (see handleRoot()).
+  "<script>"
+  "const i18n={"
+    "en:{title:'WiFi Settings',back:'\\u2190 Back',ssid_ph:'SSID',pass_ph:'New Password',"
+      "channel_label:'Channel:',update_btn:'Update WiFi',lang_btn:'\\u65e5\\u672c\\u8a9e'},"
+    "ja:{title:'Wi-Fi\\u8a2d\\u5b9a',back:'\\u2190 \\u623b\\u308b',ssid_ph:'SSID',"
+      "pass_ph:'\\u65b0\\u3057\\u3044\\u30d1\\u30b9\\u30ef\\u30fc\\u30c9',"
+      "channel_label:'\\u30c1\\u30e3\\u30f3\\u30cd\\u30eb:',update_btn:'Wi-Fi\\u3092\\u66f4\\u65b0',lang_btn:'English'}"
+  "};"
+  "let lang=localStorage.getItem('lang')||'en';"
+  "function t(k){return i18n[lang][k];}"
+  "function applyLang(){"
+    "document.title=t('title');"
+    "document.getElementById('title').innerText=t('title');"
+    "document.getElementById('backLink').innerText=t('back');"
+    "document.getElementById('ssid').placeholder=t('ssid_ph');"
+    "document.getElementById('pass').placeholder=t('pass_ph');"
+    "document.getElementById('chLabel').innerText=t('channel_label');"
+    "document.getElementById('updateBtn').innerText=t('update_btn');"
+    "document.getElementById('langBtn').innerText=t('lang_btn');"
+  "}"
+  "function toggleLang(){"
+    "lang=(lang=='en')?'ja':'en';"
+    "localStorage.setItem('lang',lang);"
+    "applyLang();"
+  "}"
+  "applyLang();"
+  "</script>"
 
   "</body></html>";
 
@@ -479,6 +550,7 @@ void setup() {
   webServer.on("/", handleRoot);
   webServer.on("/data", handleData);
   webServer.on("/mode", handleMode);
+  webServer.on("/wifi", HTTP_GET, handleWifiPage);
   webServer.on("/wifi", HTTP_POST, handleWifiSettings);
   webServer.onNotFound(handleCaptivePortal);
   webServer.begin();
