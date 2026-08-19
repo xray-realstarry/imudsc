@@ -1,6 +1,8 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <WebServer.h>
+#include <DNSServer.h>
+#include <esp_netif.h>
 #include <SparkFun_BNO08x_Arduino_Library.h>
 #include <Preferences.h>
 
@@ -15,6 +17,12 @@ WiFiServer skySafariServer(4030);
 
 constexpr char DEFAULT_WIFI_PASS[]  = "12345678";
 constexpr int  DEFAULT_WIFI_CHANNEL = 11;
+
+// ==================================================
+// Captive Portal
+// ==================================================
+constexpr int DNS_PORT = 53;
+DNSServer dnsServer;
 
 // ==================================================
 // Web Settings
@@ -35,8 +43,15 @@ enum ImuMode {
 };
 
 ImuMode imuMode = IMU_ROTATION;
+// Set from imuInitTask (a separate FreeRTOS task); read from loop(). IMU
+// init can block for a long time (or, occasionally, indefinitely - see
+// imuInitTask), so it must never run on the same task as the Wi-Fi/web/
+// DNS/BBox servers, and this flag needs to be visible across that task
+// boundary.
+volatile bool imuReady = false;
 
 const char* imuModeName() {
+  if (!imuReady) return "Not Found";
   return (imuMode == IMU_ROTATION)
          ? "Rotation (Mag)"
          : "Game (No Mag)";
@@ -91,9 +106,33 @@ void setImuMode(ImuMode mode) {
 }
 
 // ==================================================
+// IMU init (runs on its own task)
+// ==================================================
+// imu.begin() has been observed to hang indefinitely (SparkFun library,
+// SH2 handshake) if the sensor was left mid-stream by a prior firmware
+// and the ESP32 alone gets reset (no power cycle). Running it on its own
+// task - instead of inline in setup() - keeps that hang from blocking
+// the Wi-Fi/web/DNS/BBox servers, which all come up first in setup().
+void imuInitTask(void *pvParameters) {
+  Wire.begin(21, 22);
+  Wire.setClock(400000);
+
+  if (imu.begin(0x4A) || imu.begin(0x4B)) {
+    setImuMode(IMU_ROTATION);
+    imuReady = true;
+    Serial.println("IMU ready");
+  } else {
+    Serial.println("ERROR: BNO08x not found - continuing without IMU");
+  }
+
+  vTaskDelete(NULL);
+}
+
+// ==================================================
 // Update position from IMU
 // ==================================================
 void updatePosition() {
+  if (!imuReady) return;
   if (!imu.getSensorEvent()) return;
 
   if (imuMode == IMU_ROTATION &&
@@ -237,6 +276,50 @@ void handleWifiSettings() {
   ESP.restart();
 }
 
+// Answers OS captive-portal connectivity checks (Apple/Android/Windows all
+// probe a well-known URL right after joining Wi-Fi) with a redirect to the
+// root page, so phones/laptops pop the settings page open automatically.
+// A small HTML body with a meta-refresh + JS redirect is included as a
+// fallback for clients that render the response body instead of following
+// the Location header.
+void handleCaptivePortal() {
+  String target = String("http://") + WiFi.softAPIP().toString() + "/";
+  String body =
+    "<html><head><meta http-equiv='refresh' content='0;url=" + target + "'>"
+    "<script>location.replace('" + target + "');</script></head>"
+    "<body>Redirecting to <a href='" + target + "'>" + target + "</a></body></html>";
+  webServer.sendHeader("Location", target, true);
+  webServer.send(302, "text/html", body);
+}
+
+// RFC 8910/8908: advertise the captive portal URI via DHCP option 114, so
+// modern OSes (iOS/iPadOS 14+, recent Android) can detect the portal
+// directly from the DHCP offer instead of relying solely on the DNS/HTTP
+// probe tricks above - this isn't defeated by a client routing its
+// connectivity-check DNS query elsewhere (e.g. iCloud Private Relay).
+// Requires ESP32 Arduino core 3.3.0+ (ESP-IDF 5.4+, update via Boards
+// Manager) - ESP_NETIF_CAPTIVEPORTAL_URI does not exist on older cores,
+// so this is a compile-time requirement, not a runtime fallback.
+void setupCaptivePortalDhcpOption() {
+  String uri = String("http://") + WiFi.softAPIP().toString() + "/";
+  esp_netif_t *apNetif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (!apNetif) {
+    Serial.println("WARNING: DHCP captive portal option: no AP netif");
+    return;
+  }
+
+  esp_netif_dhcps_stop(apNetif);
+  esp_err_t err = esp_netif_dhcps_option(apNetif, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI,
+                                          (void *)uri.c_str(), uri.length());
+  esp_netif_dhcps_start(apNetif);
+
+  if (err == ESP_OK) {
+    Serial.println("DHCP captive portal option (114) set: " + uri);
+  } else {
+    Serial.println("WARNING: DHCP captive portal option failed: " + String(esp_err_to_name(err)));
+  }
+}
+
 void handleRoot() {
   String html =
   "<html><head><meta charset='UTF-8'>"
@@ -377,19 +460,19 @@ void setup() {
   Serial.println("CH:   [" + String(wifiChannel) + "]");
   Serial.println("-------------------------");
 
-  Wire.begin(21, 22);
-  Wire.setClock(400000);
-
-  if (!imu.begin(0x4A) && !imu.begin(0x4B)) {
-    Serial.println("ERROR: BNO08x not found");
-    while (true);
-  }
-
-  setImuMode(IMU_ROTATION);
-
-  // Wi-Fi mode was already set to WIFI_AP above (to read the MAC address).
+  // Bring up Wi-Fi / the captive portal / web UI / BBox server *before*
+  // touching the IMU, so the device stays reachable on the network even
+  // if the sensor is missing or its init hangs (see updatePosition(),
+  // which no-ops until imuReady is set below).
   WiFi.setSleep(false);
   WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str(), wifiChannel);
+
+  // Captive portal: answer every DNS query with our own IP, and redirect
+  // any unrecognized HTTP path there too, so connecting to the Wi-Fi
+  // network pops the settings page open automatically. Also advertise it
+  // via DHCP option 114 for OSes that support the modern RFC 8910 path.
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+  setupCaptivePortalDhcpOption();
 
   skySafariServer.begin();
 
@@ -397,9 +480,14 @@ void setup() {
   webServer.on("/data", handleData);
   webServer.on("/mode", handleMode);
   webServer.on("/wifi", HTTP_POST, handleWifiSettings);
+  webServer.onNotFound(handleCaptivePortal);
   webServer.begin();
 
   Serial.println("SkySafari BBox Encoder Ready");
+
+  // IMU init runs on its own task so a hang there can't block the servers
+  // started above (see imuInitTask).
+  xTaskCreatePinnedToCore(imuInitTask, "imuInit", 4096, NULL, 1, NULL, 1);
 }
 
 // ==================================================
@@ -408,6 +496,7 @@ void setup() {
 void loop() {
   updatePosition();
   webServer.handleClient();
+  dnsServer.processNextRequest();
 
   WiFiClient client = skySafariServer.available();
   if (!client) return;
@@ -415,6 +504,7 @@ void loop() {
   while (client.connected()) {
     updatePosition();
     webServer.handleClient();
+    dnsServer.processNextRequest();
 
     if (!client.available()) continue;
 
