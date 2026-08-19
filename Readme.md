@@ -6,6 +6,7 @@ This project implements a **Push-To telescope controller** using an **ESP32** an
 * **BNO086 Integration**: High-precision orientation using the Rotation Vector sensor.
 * **SkySafari Compatibility**: Emulates the BBox (Tangent) protocol over Wi-Fi.
 * **SoftAP Mode**: The ESP32 acts as an Access Point—no router needed in the field.
+* **Configurable Wi-Fi**: Customize the SoftAP SSID/password/channel from the web UI; settings persist across reboots.
 * **Low Latency**: Optimized sensor polling for smooth tracking.
 
 ## Hardware Requirements
@@ -28,17 +29,19 @@ Please install the following library via the Arduino Library Manager:
 ## Web Interface
 The ESP32 hosts a built-in web server for real-time monitoring and configuration. 
 
-1. Connect to the **"ESP32_Telescope"** Wi-Fi.
+1. Connect to the **Wi-Fi network** (default SSID: `IMUDSC_XXXX`, where `XXXX` is derived from the ESP32's MAC address; default password: `12345678`).
 2. Open your web browser and navigate to `http://192.168.4.1`.
 3. **Features**:
     * **Live Monitoring**: View current Altitude and Azimuth values.
     * **Sensor Status**: Check BNO086 calibration and connection state.
     * **Calibration**: Reset or adjust the sensor orientation.
+    * **WiFi Settings**: Change the SoftAP SSID, password (8-63 chars), and channel (persisted, requires reboot).
+    * **Language**: Toggle the UI between English and Japanese (button top of page; choice is remembered).
 
 ## SkySafari Setup
 To connect SkySafari to your telescope, follow these steps:
 
-1. **Connect Wi-Fi**: Connect your smartphone/tablet to the network **"ESP32_Telescope"** (Password: `12345678`).
+1. **Connect Wi-Fi**: Connect your smartphone/tablet to the ESP32's Wi-Fi network (default SSID `IMUDSC_XXXX`, password `12345678`; check the Web Interface if you've customized it).
 2. **Equipment Selection**:
     * **Scope Type**: `Basic Encoder System`
     * **Mount Type**: `Alt-Az. Push-To`
