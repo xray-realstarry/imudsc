@@ -72,6 +72,11 @@ constexpr long ALT_RES = long(360.0f * ALT_STEPS_PER_DEG);
 float current_az_deg  = 0.0f;
 float current_alt_deg = 0.0f;
 
+// Rotation vector accuracy as reported by the sensor (0-3: Unreliable,
+// Low, Medium, High). Shown in the web UI so users can tell a bad
+// heading reading from magnetic interference apart from a real move.
+uint8_t imuAccuracy = 0;
+
 // ==================================================
 // Encoder counters (BBox wrapped)
 // ==================================================
@@ -144,6 +149,7 @@ void updatePosition() {
   // --- IMU raw angles (deg) ---
   float yaw   = imu.getYaw()   * 180.0f / PI;
   float pitch = imu.getPitch() * 180.0f / PI;
+  imuAccuracy = imu.getQuatAccuracy();
 
   // --- IMU -> astronomy sign convention ---
   yaw   = -yaw;
@@ -185,7 +191,8 @@ void handleData() {
   String json = "{";
   json += "\"az\":" + String(current_az_deg) + ",";
   json += "\"alt\":" + String(current_alt_deg) + ",";
-  json += "\"imu\":\"" + String(imuModeName()) + "\"";
+  json += "\"imu\":\"" + String(imuModeName()) + "\",";
+  json += "\"acc\":" + String(imuAccuracy);
   json += "}";
   webServer.send(200, "application/json", json);
 }
@@ -350,6 +357,7 @@ void handleRoot() {
   "<div>AZ: <span id='az' class='val'>0</span>\xc2\xb0</div>"
   "<div>ALT: <span id='alt' class='val'>0</span>\xc2\xb0</div>"
   "<div style='margin-top:20px'><span id='imuLabel'>IMU:</span> <b id='imu'>?</b></div>"
+  "<div id='accRow'><span id='accLabel'>Accuracy:</span> <b id='acc'>?</b></div>"
   "<br><button id='btn' onclick='toggleIMU()'>Switch</button>"
   "<br><a id='wifiLink' class='btn' href='/wifi'>WiFi Settings</a>"
 
@@ -359,20 +367,24 @@ void handleRoot() {
   // the whole script and left AZ/ALT/IMU frozen at their placeholder text.
   "<script>"
   "const i18n={"
-    "en:{title:'Telescope Status',imu_label:'IMU:',"
+    "en:{title:'Telescope Status',imu_label:'IMU:',acc_label:'Accuracy:',"
       "switch_to_nocompass:'Switch to No-Compass',switch_to_compass:'Switch to Compass',"
       "mode_compass:'Compass Mode',mode_nocompass:'No-Compass Mode',mode_notfound:'Not Found',"
+      "acc_0:'Unreliable',acc_1:'Low',acc_2:'Medium',acc_3:'High',"
       "wifi_link:'WiFi Settings',lang_btn:'\\u65e5\\u672c\\u8a9e'},"
     "ja:{title:'\\u671b\\u9060\\u93e1\\u30b9\\u30c6\\u30fc\\u30bf\\u30b9',imu_label:'IMU:',"
+      "acc_label:'\\u7cbe\\u5ea6:',"
       "switch_to_nocompass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306a\\u3057\\u306b\\u5207\\u66ff',"
       "switch_to_compass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306b\\u5207\\u66ff',"
       "mode_compass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u30e2\\u30fc\\u30c9',"
       "mode_nocompass:'\\u30b3\\u30f3\\u30d1\\u30b9\\u306a\\u3057\\u30e2\\u30fc\\u30c9',"
       "mode_notfound:'\\u672a\\u691c\\u51fa',"
+      "acc_0:'\\u4fe1\\u983c\\u4e0d\\u53ef',acc_1:'\\u4f4e',acc_2:'\\u4e2d',acc_3:'\\u9ad8',"
       "wifi_link:'Wi-Fi\\u8a2d\\u5b9a',lang_btn:'English'}"
   "};"
   "let lang=localStorage.getItem('lang')||'en';"
   "let imuMode='';"
+  "let imuAcc=-1;"
   "function t(k){return i18n[lang][k];}"
   "function applyLang(){"
     "document.title=t('title');"
@@ -387,6 +399,11 @@ void handleRoot() {
       "imuMode=='compass'?t('mode_compass'):"
       "imuMode=='nocompass'?t('mode_nocompass'):"
       "imuMode=='notfound'?t('mode_notfound'):'?';"
+    "document.getElementById('accRow').style.display="
+      "imuMode=='notfound'?'none':'block';"
+    "document.getElementById('accLabel').innerText=t('acc_label');"
+    "document.getElementById('acc').innerText="
+      "imuAcc>=0?t('acc_'+imuAcc):'?';"
   "}"
   "function toggleLang(){"
     "lang=(lang=='en')?'ja':'en';"
@@ -398,6 +415,7 @@ void handleRoot() {
       "document.getElementById('az').innerText=d.az.toFixed(2);"
       "document.getElementById('alt').innerText=d.alt.toFixed(2);"
       "imuMode=d.imu.includes('Rotation')?'compass':d.imu.includes('Game')?'nocompass':'notfound';"
+      "imuAcc=d.acc;"
       "applyLang();"
     "});"
   "}"
@@ -485,21 +503,57 @@ void handleWifiPage() {
 }
 
 // ==================================================
+// Factory reset (BOOT button)
+// ==================================================
+// Holding the DevKit's BOOT button (GPIO0, active LOW) for 5s clears the
+// saved WiFi SSID/password/channel and reboots to the auto-generated
+// defaults. This is the only way to recover if the WiFi password was
+// changed and then forgotten - the web UI can't help at that point since
+// you can no longer join the network to reach it.
+constexpr int FACTORY_RESET_PIN = 0;
+constexpr unsigned long FACTORY_RESET_HOLD_MS = 5000;
+unsigned long factoryResetPressStart = 0;
+
+void checkFactoryResetButton() {
+  if (digitalRead(FACTORY_RESET_PIN) != LOW) {
+    factoryResetPressStart = 0;
+    return;
+  }
+
+  if (factoryResetPressStart == 0) {
+    factoryResetPressStart = millis();
+  } else if (millis() - factoryResetPressStart >= FACTORY_RESET_HOLD_MS) {
+    Serial.println("Factory reset: clearing WiFi settings...");
+    preferences.begin("wifi", false);
+    preferences.clear();
+    preferences.end();
+    delay(200);
+    ESP.restart();
+  }
+}
+
+// ==================================================
 // Setup
 // ==================================================
 void setup() {
   Serial.begin(115200);
   delay(500);
 
+  pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
+
   // --- Prepare auto-generated SSID ---
-  // Initialize Wi-Fi in AP mode first to get the MAC address
+  // Read the chip's factory-programmed eFuse MAC directly, rather than
+  // via WiFi.softAPmacAddress(). The latter depends on the WiFi driver
+  // being fully up, which is reliable after a cold power-on but was seen
+  // to return an all-zero MAC (-> "IMUDSC_0000") right after ESP.restart()
+  // (e.g. from the factory-reset button) - the eFuse read has no such
+  // dependency.
+  uint64_t chipId = ESP.getEfuseMac();
+  char chipIdSuffix[5];
+  snprintf(chipIdSuffix, sizeof(chipIdSuffix), "%04X", (uint16_t)(chipId & 0xFFFF));
+  String defaultSSID = "IMUDSC_" + String(chipIdSuffix);
+
   WiFi.mode(WIFI_AP);
-  String mac = WiFi.softAPmacAddress(); // e.g., "AA:BB:CC:11:22:33"
-  mac.replace(":", "");                 // Remove colons -> "AABBCC112233"
-  
-  // Create default SSID using the last 4 characters
-  // e.g., "IMUDSC_" + "2233" -> "IMUDSC_2233"
-  String defaultSSID = "IMUDSC_" + mac.substring(8); 
 
   preferences.begin("wifi", false);
 
@@ -569,6 +623,7 @@ void loop() {
   updatePosition();
   webServer.handleClient();
   dnsServer.processNextRequest();
+  checkFactoryResetButton();
 
   WiFiClient client = skySafariServer.available();
   if (!client) return;
@@ -577,6 +632,7 @@ void loop() {
     updatePosition();
     webServer.handleClient();
     dnsServer.processNextRequest();
+    checkFactoryResetButton();
 
     if (!client.available()) continue;
 

@@ -33,8 +33,8 @@ The ESP32 hosts a built-in web server for real-time monitoring and configuration
 1. Connect to the **Wi-Fi network** (default SSID: `IMUDSC_XXXX`, where `XXXX` is derived from the ESP32's MAC address; default password: `12345678`).
 2. A captive portal should open the status/settings page automatically on most phones and laptops (via DHCP option 114 and, as a fallback, DNS/HTTP redirect probing). If it doesn't, open your web browser and navigate to `http://192.168.4.1`. iOS/Android sometimes cache a network as "no portal" from a previous connection - if it doesn't pop up, try "Forget This Network" and reconnecting.
 3. **Features**:
-    * **Live Monitoring**: View current Altitude and Azimuth values.
-    * **IMU Mode Switch**: Toggle between Rotation Vector (magnetometer-assisted) and Game Rotation Vector (no magnetometer).
+    * **Live Monitoring**: View current Altitude and Azimuth values, plus the IMU's own confidence in that reading (Unreliable/Low/Medium/High) - useful for spotting magnetic interference.
+    * **IMU Mode Switch**: Toggle between Compass Mode (magnetometer-assisted heading) and No-Compass Mode (no magnetometer, immune to magnetic interference but may drift over time).
     * **WiFi Settings**: Change the SoftAP SSID, password (8-63 chars), and channel (persisted, requires reboot).
     * **Language**: Toggle the UI between English and Japanese (button top of page; choice is remembered).
 
@@ -58,6 +58,7 @@ To connect SkySafari to your telescope, follow these steps:
 * **Magnetic Interference**: Keep the BNO086 away from large metal objects or motors to avoid heading drift.
 * **Leveling**: Ensure your telescope base is as level as possible for the best accuracy.
 * **Power Supply**: Power the ESP32 from a proper 5V source (a USB power bank/wall adapter) rather than a computer's USB port. A computer port can current-limit or sag under the brief power draw of Wi-Fi transmission, which was observed to intermittently prevent the BNO086 from initializing (looks like "IMU not found" or a hang at boot) - a dedicated power bank resolved it.
+* **Forgot your WiFi password?**: Hold the ESP32's **BOOT** button for 5 seconds while it's running. This clears the saved SSID/password/channel and reboots back to the auto-generated defaults (`IMUDSC_XXXX` / `12345678`).
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
