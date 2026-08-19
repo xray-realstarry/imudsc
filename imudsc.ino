@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <WebServer.h>
+#include <DNSServer.h>
 #include <SparkFun_BNO08x_Arduino_Library.h>
 #include <Preferences.h>
 
@@ -15,6 +16,12 @@ WiFiServer skySafariServer(4030);
 
 constexpr char DEFAULT_WIFI_PASS[]  = "12345678";
 constexpr int  DEFAULT_WIFI_CHANNEL = 11;
+
+// ==================================================
+// Captive Portal
+// ==================================================
+constexpr int DNS_PORT = 53;
+DNSServer dnsServer;
 
 // ==================================================
 // Web Settings
@@ -237,6 +244,14 @@ void handleWifiSettings() {
   ESP.restart();
 }
 
+// Answers OS captive-portal connectivity checks (Apple/Android/Windows all
+// probe a well-known URL right after joining Wi-Fi) with a redirect to the
+// root page, so phones/laptops pop the settings page open automatically.
+void handleCaptivePortal() {
+  webServer.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+  webServer.send(302, "text/plain", "");
+}
+
 void handleRoot() {
   String html =
   "<html><head><meta charset='UTF-8'>"
@@ -391,12 +406,18 @@ void setup() {
   WiFi.setSleep(false);
   WiFi.softAP(wifiSSID.c_str(), wifiPASS.c_str(), wifiChannel);
 
+  // Captive portal: answer every DNS query with our own IP, and redirect
+  // any unrecognized HTTP path there too, so connecting to the Wi-Fi
+  // network pops the settings page open automatically.
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
   skySafariServer.begin();
 
   webServer.on("/", handleRoot);
   webServer.on("/data", handleData);
   webServer.on("/mode", handleMode);
   webServer.on("/wifi", HTTP_POST, handleWifiSettings);
+  webServer.onNotFound(handleCaptivePortal);
   webServer.begin();
 
   Serial.println("SkySafari BBox Encoder Ready");
@@ -408,6 +429,7 @@ void setup() {
 void loop() {
   updatePosition();
   webServer.handleClient();
+  dnsServer.processNextRequest();
 
   WiFiClient client = skySafariServer.available();
   if (!client) return;
@@ -415,6 +437,7 @@ void loop() {
   while (client.connected()) {
     updatePosition();
     webServer.handleClient();
+    dnsServer.processNextRequest();
 
     if (!client.available()) continue;
 

@@ -7,6 +7,7 @@ This project implements a **Push-To telescope controller** using an **ESP32** an
 * **SkySafari Compatibility**: Emulates the BBox (Tangent) protocol over Wi-Fi.
 * **SoftAP Mode**: The ESP32 acts as an Access Point—no router needed in the field.
 * **Configurable Wi-Fi**: Customize the SoftAP SSID/password/channel from the web UI; settings persist across reboots.
+* **Captive Portal**: The settings page pops up automatically when you join the Wi-Fi network, like a hotel/cafe Wi-Fi login page.
 * **Low Latency**: Optimized sensor polling for smooth tracking.
 
 ## Hardware Requirements
@@ -30,7 +31,7 @@ Please install the following library via the Arduino Library Manager:
 The ESP32 hosts a built-in web server for real-time monitoring and configuration. 
 
 1. Connect to the **Wi-Fi network** (default SSID: `IMUDSC_XXXX`, where `XXXX` is derived from the ESP32's MAC address; default password: `12345678`).
-2. Open your web browser and navigate to `http://192.168.4.1`.
+2. A captive portal should open the status/settings page automatically on most phones and laptops. If it doesn't, open your web browser and navigate to `http://192.168.4.1`.
 3. **Features**:
     * **Live Monitoring**: View current Altitude and Azimuth values.
     * **IMU Mode Switch**: Toggle between Rotation Vector (magnetometer-assisted) and Game Rotation Vector (no magnetometer).
