@@ -57,6 +57,7 @@ To connect SkySafari to your telescope, follow these steps:
 * **Alignment**: After connecting, use the "Align" feature in SkySafari on a known star to synchronize the IMU with the sky.
 * **Magnetic Interference**: Keep the BNO086 away from large metal objects or motors to avoid heading drift.
 * **Leveling**: Ensure your telescope base is as level as possible for the best accuracy.
+* **Power Supply**: Power the ESP32 from a proper 5V source (a USB power bank/wall adapter) rather than a computer's USB port. A computer port can current-limit or sag under the brief power draw of Wi-Fi transmission, which was observed to intermittently prevent the BNO086 from initializing (looks like "IMU not found" or a hang at boot) - a dedicated power bank resolved it.
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
