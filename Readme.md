@@ -33,10 +33,11 @@ The ESP32 hosts a built-in web server for real-time monitoring and configuration
 2. Open your web browser and navigate to `http://192.168.4.1`.
 3. **Features**:
     * **Live Monitoring**: View current Altitude and Azimuth values.
-    * **Sensor Status**: Check BNO086 calibration and connection state.
-    * **Calibration**: Reset or adjust the sensor orientation.
+    * **IMU Mode Switch**: Toggle between Rotation Vector (magnetometer-assisted) and Game Rotation Vector (no magnetometer).
     * **WiFi Settings**: Change the SoftAP SSID, password (8-63 chars), and channel (persisted, requires reboot).
     * **Language**: Toggle the UI between English and Japanese (button top of page; choice is remembered).
+
+    Note: there's no zero-point/orientation calibration step, and none is needed—SkySafari's own "Align" (below) is what maps the device's readings to the real sky, regardless of where the IMU's zero happens to be.
 
 ## SkySafari Setup
 To connect SkySafari to your telescope, follow these steps:
