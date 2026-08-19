@@ -24,14 +24,14 @@ This project implements a **Push-To telescope controller** using an **ESP32** an
 | **GND** | GND | Ground |
 
 ## Software Dependencies
-Please install the following library via the Arduino Library Manager:
-* **SparkFun BNO08x Arduino Library** (by SparkFun Electronics)
+* **ESP32 Arduino core 3.3.0 or later** (Boards Manager > esp32). Needed for DHCP option 114 (RFC 8910) captive-portal support - the sketch won't compile on older cores.
+* **SparkFun BNO08x Arduino Library** (by SparkFun Electronics), via the Arduino Library Manager.
 
 ## Web Interface
-The ESP32 hosts a built-in web server for real-time monitoring and configuration. 
+The ESP32 hosts a built-in web server for real-time monitoring and configuration. It stays reachable even if the IMU fails to initialize or isn't connected - the Wi-Fi/web/captive-portal stack always comes up first.
 
 1. Connect to the **Wi-Fi network** (default SSID: `IMUDSC_XXXX`, where `XXXX` is derived from the ESP32's MAC address; default password: `12345678`).
-2. A captive portal should open the status/settings page automatically on most phones and laptops. If it doesn't, open your web browser and navigate to `http://192.168.4.1`.
+2. A captive portal should open the status/settings page automatically on most phones and laptops (via DHCP option 114 and, as a fallback, DNS/HTTP redirect probing). If it doesn't, open your web browser and navigate to `http://192.168.4.1`. iOS/Android sometimes cache a network as "no portal" from a previous connection - if it doesn't pop up, try "Forget This Network" and reconnecting.
 3. **Features**:
     * **Live Monitoring**: View current Altitude and Azimuth values.
     * **IMU Mode Switch**: Toggle between Rotation Vector (magnetometer-assisted) and Game Rotation Vector (no magnetometer).
